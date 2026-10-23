@@ -1,4 +1,4 @@
-# multeq-tools
+# denon-multeq-tools
 
 Tools for Denon/Marantz receivers with **Audyssey MultEQ XT**: inspect and edit `.ady`
 calibration files, find room/furniture resonances with a test tone, and upload the
