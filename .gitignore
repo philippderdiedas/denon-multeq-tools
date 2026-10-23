@@ -1,0 +1,15 @@
+# personal calibration data and receiver dumps
+*.ady
+*.mqx
+*.oca
+avr_state*.json
+*.log
+# never commit app binaries or decompiled output
+*.so
+*.apk
+*.dex
+re/
+jadx/
+meq_filter.py
+__pycache__/
+.venv/

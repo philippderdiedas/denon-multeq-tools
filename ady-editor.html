@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>ADY Editor</title>
+<style>
+  :root { --bg:#16181d; --panel:#1f2229; --line:#2e323c; --text:#d8dbe2; --dim:#8a90a0;
+          --accent:#4fa3ff; --curve:#ffb84f; --warn:#ff6b6b; --ok:#5fd38d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px; background:var(--panel);
+           border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 12px 0 0; }
+  main { display:grid; grid-template-columns: 220px 1fr 300px; gap:12px; padding:12px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); margin:0 0 8px; }
+  button { background:#2b3040; color:var(--text); border:1px solid var(--line); border-radius:4px;
+           padding:5px 10px; cursor:pointer; font:inherit; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#000; border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  input[type=number], input[type=text] { width:70px; background:#12141a; color:var(--text);
+           border:1px solid var(--line); border-radius:4px; padding:3px 5px; font:inherit; }
+  label { display:flex; align-items:center; gap:6px; margin:4px 0; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+  .dim { color:var(--dim); font-size:12px; }
+  .warn { color:var(--warn); }
+  #drop { border:2px dashed var(--line); border-radius:6px; padding:40px; text-align:center;
+          color:var(--dim); margin:12px; }
+  #drop.over { border-color:var(--accent); color:var(--accent); }
+  .chan { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:4px; cursor:pointer; }
+  .chan.active { background:#2b3040; }
+  .chan .name { flex:1; }
+  .chan .tag { font-size:11px; color:var(--warn); }
+  canvas { width:100%; height:460px; display:block; background:#12141a; border-radius:4px; cursor:crosshair; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { padding:2px 4px; text-align:right; }
+  th { color:var(--dim); font-weight:normal; }
+  td input { width:64px; }
+  #points { max-height:220px; overflow:auto; }
+  #tonefreq { font-size:22px; font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>ADY Editor</h1>
+  <button id="open">Öffnen…</button>
+  <input id="file" type="file" accept=".ady,.json" class="hidden">
+  <button id="save" class="primary" disabled>Speichern…</button>
+  <button id="undo" disabled title="Strg+Z">Rückgängig</button>
+  <span id="title" class="dim"></span>
+</header>
+
+<div id="drop">.ady-Datei hier hineinziehen oder <b>Öffnen…</b> klicken</div>
+
+<main id="app" class="hidden">
+  <div>
+    <section>
+      <h2>Kanäle</h2>
+      <div id="channels"></div>
+      <p class="dim">Klick = anzeigen/bearbeiten.<br>Haken = Ziel für Notch, Kopieren &amp; Testton.</p>
+    </section>
+    <section style="margin-top:12px">
+      <h2>Kanal-Einstellungen</h2>
+      <div id="settings"></div>
+    </section>
+  </div>
+
+  <div>
+    <section>
+      <div class="row" style="justify-content:space-between">
+        <h2 id="charttitle" style="margin:0">Frequenzgang</h2>
+        <span id="hover" class="dim"></span>
+      </div>
+      <canvas id="chart"></canvas>
+      <div class="row dim">
+        <label><input type="checkbox" id="showpos"> Einzelne Messpositionen</label>
+        <span>Ziehen = Punkt verschieben · Doppelklick = Punkt hinzufügen/löschen · Mausrad = Zoom</span>
+        <button id="resetzoom">Zoom zurücksetzen</button>
+      </div>
+    </section>
+  </div>
+
+  <div>
+    <section>
+      <h2>Testton</h2>
+      <div class="row"><span id="tonefreq">100.0 Hz</span></div>
+      <input id="toneslider" type="range" min="0" max="1000" value="500">
+      <div class="row">
+        <button data-step="-1">−1</button><button data-step="-0.1">−0.1</button>
+        <button data-step="0.1">+0.1</button><button data-step="1">+1</button>
+        <input id="toneinput" type="number" step="0.1" value="100"> Hz
+      </div>
+      <label>Lautstärke <input id="tonevol" type="range" min="0" max="100" value="15"></label>
+      <div class="row">
+        <button id="tone">▶ Ton</button>
+        <button id="sweep">Sweep</button>
+        <label>von <input id="sweepfrom" type="number" value="30"> bis <input id="sweepto" type="number" value="400"> Hz</label>
+      </div>
+      <p id="toneroute" class="dim"></p>
+      <p class="dim">Langsam durchfahren, bis das Blech scheppert. Vorher die Anlage leise stellen!
+        Am Receiver nicht „Direct“/„Pure Direct“ wählen, sonst ist Audyssey aus.</p>
+    </section>
+
+    <section style="margin-top:12px">
+      <h2>Notch</h2>
+      <div class="row">
+        <label>f <input id="nf" type="number" step="0.1" value="100"> Hz</label>
+        <button id="nfromtone" title="Frequenz vom Testton übernehmen">← Ton</button>
+      </div>
+      <div class="row">
+        <label>Gain <input id="ng" type="number" step="0.5" value="-10"> dB</label>
+        <label>Q <input id="nq" type="number" step="0.5" value="8"></label>
+      </div>
+      <div class="row"><button id="notch" class="primary">Auf markierte Kanäle anwenden</button></div>
+    </section>
+
+    <section style="margin-top:12px">
+      <h2>Zielkurve <span id="curvechan"></span></h2>
+      <div id="points"></div>
+      <div class="row">
+        <button id="addpt">+ Punkt</button>
+        <button id="clearcurve">Kurve leeren</button>
+        <button id="copycurve">→ markierte Kanäle</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+const FS = 48000;                 // Audyssey impulse responses are 48 kHz
+const CURVE_KEY = "customTargetCurvePoints";
+// Per-channel fields that can be edited; everything else is left untouched.
+const EDIT_KEYS = [CURVE_KEY, "trimAdjustment", "delayAdjustment", "midrangeCompensation",
+                   "frequencyRangeRolloff"];
+
+let rawText = null, fileName = "", data = null;
+let original = [];                // per channel: JSON of EDIT_KEYS at load time
+let curves = [];                  // per channel: [[f, db], ...] sorted
+let responses = [];               // per channel: {avg: Float64Array, pos: [Float64Array]}
+let active = 0, targets = new Set();
+let undoStack = [];
+const view = { fmin: 10, fmax: 24000, dbmin: -40, dbmax: 20 };
+const FREQS = logspace(10, 24000, 480);
+
+const $ = id => document.getElementById(id);
+
+// ------------------------------------------------------------- load / save
+
+$("open").onclick = () => $("file").click();
+$("file").onchange = e => e.target.files[0] && loadFile(e.target.files[0]);
+const drop = $("drop");
+for (const t of [document.body]) {
+  t.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+  t.addEventListener("dragleave", () => drop.classList.remove("over"));
+  t.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("over");
+    if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  });
+}
+
+async function loadFile(file) {
+  let text = await file.text();
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch (err) { alert("Keine gültige .ady/JSON-Datei:\n" + err.message); return; }
+  if (!Array.isArray(parsed.detectedChannels)) { alert("Keine 'detectedChannels' gefunden."); return; }
+  rawText = text; fileName = file.name; data = parsed;
+  const chans = data.detectedChannels;
+  original = chans.map(ch => JSON.stringify(EDIT_KEYS.map(k => ch[k])));
+  curves = chans.map(ch => parseCurve(ch[CURVE_KEY]));
+  responses = chans.map(ch => computeResponse(ch.responseData));
+  active = 0; targets = new Set(chans.map((_, i) => i)); undoStack = [];
+  $("title").textContent = `${file.name} · ${data.targetModelName || ""} · ${data.title || ""}`;
+  drop.classList.add("hidden"); $("app").classList.remove("hidden");
+  $("save").disabled = false;
+  renderAll(); routeTone();
+}
+
+$("save").onclick = () => {
+  syncCurves();
+  const out = serialize();
+  const blob = new Blob([out], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = fileName.replace(/(\.ady)?$/i, "_edit.ady");
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+
+function syncCurves() {
+  data.detectedChannels.forEach((ch, i) => {
+    const before = parseCurve(ch[CURVE_KEY]);
+    // Keep the original strings when nothing changed, so the file stays byte-identical.
+    if (JSON.stringify(before) !== JSON.stringify(curves[i])) ch[CURVE_KEY] = formatCurve(curves[i]);
+  });
+}
+
+// Patch only the changed values into the original text. Re-serializing the
+// whole file would turn e.g. 20000.0 into 20000, which the app might not like.
+function serialize() {
+  const chans = data.detectedChannels;
+  const start = rawText.indexOf('"detectedChannels"');
+  const patches = [];
+  for (const key of EDIT_KEYS) {
+    const occ = findKeyValues(rawText, key, start);
+    const changed = chans.some((ch, i) =>
+      JSON.stringify(ch[key]) !== JSON.stringify(JSON.parse(original[i])[EDIT_KEYS.indexOf(key)]));
+    if (!changed) continue;
+    if (occ.length !== chans.length) {
+      alert(`Konnte '${key}' nicht gezielt ersetzen – Datei wird komplett neu geschrieben.`);
+      return JSON.stringify(data);
+    }
+    chans.forEach((ch, i) => patches.push([occ[i][0], occ[i][1], jsonValue(ch[key])]));
+  }
+  patches.sort((a, b) => b[0] - a[0]);
+  let out = rawText;
+  for (const [s, e, v] of patches) out = out.slice(0, s) + v + out.slice(e);
+  return out;
+}
+
+function jsonValue(v) {
+  // Floats that are whole numbers keep their ".0" like in the original file.
+  if (typeof v === "number" && Number.isInteger(v)) return v.toFixed(1);
+  return JSON.stringify(v);
+}
+
+// Returns [start, end) of the value for every `"key":` after `from`.
+function findKeyValues(text, key, from) {
+  const needle = `"${key}"`, res = [];
+  let i = text.indexOf(needle, from);
+  while (i !== -1) {
+    let p = i + needle.length;
+    while (/\s/.test(text[p])) p++;
+    if (text[p] === ":") {
+      p++;
+      while (/\s/.test(text[p])) p++;
+      res.push([p, scanValueEnd(text, p)]);
+    }
+    i = text.indexOf(needle, p);
+  }
+  return res;
+}
+
+function scanValueEnd(text, p) {
+  let depth = 0, inStr = false;
+  for (; p < text.length; p++) {
+    const c = text[p];
+    if (inStr) { if (c === "\\") p++; else if (c === '"') { inStr = false; if (!depth) return p + 1; } continue; }
+    if (c === '"') inStr = true;
+    else if (c === "[" || c === "{") depth++;
+    else if (c === "]" || c === "}") { if (depth === 0) return p; if (--depth === 0) return p + 1; }
+    else if (c === "," && depth === 0) return p;
+  }
+  return p;
+}
+
+// ------------------------------------------------------------------ curves
+
+function parseCurve(points) {
+  return (points || []).map(p => {
+    if (typeof p === "string") return p.replace(/[{}]/g, "").split(",").map(Number);
+    return [Number(p[0]), Number(p[1])];
+  }).filter(p => p.every(Number.isFinite)).sort((a, b) => a[0] - b[0]);
+}
+
+const num = x => String(Math.round(x * 10) / 10);
+const formatCurve = c => [...c].sort((a, b) => a[0] - b[0]).map(([f, d]) => `{${num(f)}, ${num(d)}}`);
+
+function interpCurve(c, f) {
+  if (!c.length) return 0;
+  if (f <= c[0][0]) return c[0][1];
+  if (f >= c[c.length - 1][0]) return c[c.length - 1][1];
+  for (let i = 1; i < c.length; i++) {
+    const [f0, d0] = c[i - 1], [f1, d1] = c[i];
+    if (f <= f1) return d0 + (Math.log(f / f0) / Math.log(f1 / f0)) * (d1 - d0);
+  }
+  return 0;
+}
+
+function peakingDb(f, fc, gain, q) {
+  const A = 10 ** (gain / 40), w0 = 2 * Math.PI * fc / FS, al = Math.sin(w0) / (2 * q);
+  const b = [1 + al * A, -2 * Math.cos(w0), 1 - al * A], a = [1 + al / A, -2 * Math.cos(w0), 1 - al / A];
+  const w = 2 * Math.PI * f / FS;
+  const h = (c) => {
+    const re = c[0] + c[1] * Math.cos(w) + c[2] * Math.cos(2 * w);
+    const im = -c[1] * Math.sin(w) - c[2] * Math.sin(2 * w);
+    return Math.hypot(re, im);
+  };
+  return 20 * Math.log10(h(b) / h(a));
+}
+
+function applyNotch(curve, fc, gain, q, density = 4) {
+  const bwOct = 2 / Math.LN2 * Math.asinh(1 / (2 * q)), span = 2 * bwOct;
+  const lo = fc * 2 ** -span, hi = fc * 2 ** span;
+  const merged = curve.filter(([f]) => f < lo || f > hi);
+  for (let k = -density; k <= density; k++) {
+    const f = fc * 2 ** (span * k / density);
+    merged.push([Math.round(f * 10) / 10, Math.round((interpCurve(curve, f) + peakingDb(f, fc, gain, q)) * 10) / 10]);
+  }
+  return merged.sort((a, b) => a[0] - b[0]);
+}
+
+function pushUndo() {
+  undoStack.push(JSON.stringify(curves));
+  if (undoStack.length > 100) undoStack.shift();
+  $("undo").disabled = false;
+}
+$("undo").onclick = undo;
+function undo() {
+  if (!undoStack.length) return;
+  curves = JSON.parse(undoStack.pop());
+  $("undo").disabled = !undoStack.length;
+  renderAll();
+}
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "z" && !(e.target instanceof HTMLInputElement)) { e.preventDefault(); undo(); }
+});
+
+// ----------------------------------------------------- measured response
+
+function logspace(a, b, n) {
+  const out = new Float64Array(n), la = Math.log(a), lb = Math.log(b);
+  for (let i = 0; i < n; i++) out[i] = Math.exp(la + (lb - la) * i / (n - 1));
+  return out;
+}
+
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const a = i + k, b = a + len / 2;
+        const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        [cr, ci] = [cr * wr - ci * wi, cr * wi + ci * wr];
+      }
+    }
+  }
+}
+
+// Power spectrum of one impulse response, smoothed to 1/12 octave on FREQS.
+function smoothedPower(ir) {
+  let n = 1; while (n < ir.length) n <<= 1;
+  const re = new Float64Array(n), im = new Float64Array(n);
+  re.set(ir);
+  fft(re, im);
+  const df = FS / n, out = new Float64Array(FREQS.length);
+  FREQS.forEach((f, i) => {
+    let lo = Math.floor(f * 2 ** (-1 / 24) / df), hi = Math.ceil(f * 2 ** (1 / 24) / df);
+    lo = Math.max(1, lo); hi = Math.min(n / 2, Math.max(hi, lo));
+    let s = 0;
+    for (let k = lo; k <= hi; k++) s += re[k] * re[k] + im[k] * im[k];
+    out[i] = s / (hi - lo + 1);
+  });
+  return out;
+}
+
+function computeResponse(resp) {
+  const irs = Object.values(resp || {}).filter(a => Array.isArray(a) && a.length);
+  if (!irs.length) return null;
+  const pows = irs.map(smoothedPower);
+  const toDb = p => Float64Array.from(p, v => 10 * Math.log10(v + 1e-20));
+  const avg = new Float64Array(FREQS.length);
+  pows.forEach(p => p.forEach((v, i) => avg[i] += v / pows.length));
+  // Normalize so the 300 Hz - 3 kHz band sits around 0 dB.
+  const avgDb = toDb(avg);
+  let s = 0, c = 0;
+  FREQS.forEach((f, i) => { if (f >= 300 && f <= 3000) { s += avgDb[i]; c++; } });
+  const ref = s / c;
+  const shift = a => a.map(v => v - ref);
+  return { avg: shift(avgDb), pos: pows.map(p => shift(toDb(p))) };
+}
+
+// ------------------------------------------------------------------- chart
+
+const cv = $("chart"), ctx = cv.getContext("2d");
+let drag = null, hoverPt = null;
+const PAD = { l: 44, r: 12, t: 10, b: 26 };
+
+function fitCanvas() {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+const W = () => cv.getBoundingClientRect().width, H = () => cv.getBoundingClientRect().height;
+const fx = f => PAD.l + (Math.log(f / view.fmin) / Math.log(view.fmax / view.fmin)) * (W() - PAD.l - PAD.r);
+const dy = d => PAD.t + (view.dbmax - d) / (view.dbmax - view.dbmin) * (H() - PAD.t - PAD.b);
+const xf = x => view.fmin * (view.fmax / view.fmin) ** ((x - PAD.l) / (W() - PAD.l - PAD.r));
+const yd = y => view.dbmax - (y - PAD.t) / (H() - PAD.t - PAD.b) * (view.dbmax - view.dbmin);
+
+function drawChart() {
+  if (!data) return;
+  fitCanvas();
+  const w = W(), h = H();
+  ctx.clearRect(0, 0, w, h);
+  ctx.font = "11px system-ui"; ctx.lineWidth = 1;
+
+  // grid
+  for (const f of [10,20,30,40,50,60,70,80,90,100,200,300,400,500,600,700,800,900,1000,2000,3000,4000,5000,6000,7000,8000,9000,10000,20000]) {
+    if (f < view.fmin || f > view.fmax) continue;
+    const major = /^[12]0*$/.test(String(f)) || f === 50 || f === 500 || f === 5000;
+    ctx.strokeStyle = major ? "#2e323c" : "#1d2028";
+    ctx.beginPath(); ctx.moveTo(fx(f), PAD.t); ctx.lineTo(fx(f), h - PAD.b); ctx.stroke();
+    if (major) { ctx.fillStyle = "#8a90a0"; ctx.fillText(f >= 1000 ? f / 1000 + "k" : f, fx(f) - 8, h - 8); }
+  }
+  const step = (view.dbmax - view.dbmin) > 40 ? 10 : 5;
+  for (let d = Math.ceil(view.dbmin / step) * step; d <= view.dbmax; d += step) {
+    ctx.strokeStyle = d === 0 ? "#3d4252" : "#1d2028";
+    ctx.beginPath(); ctx.moveTo(PAD.l, dy(d)); ctx.lineTo(w - PAD.r, dy(d)); ctx.stroke();
+    ctx.fillStyle = "#8a90a0"; ctx.fillText(d + " dB", 4, dy(d) + 4);
+  }
+
+  ctx.save();
+  ctx.beginPath(); ctx.rect(PAD.l, PAD.t, w - PAD.l - PAD.r, h - PAD.t - PAD.b); ctx.clip();
+
+  const line = (ys, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    FREQS.forEach((f, i) => i ? ctx.lineTo(fx(f), dy(ys[i])) : ctx.moveTo(fx(f), dy(ys[i])));
+    ctx.stroke();
+  };
+  const resp = responses[active];
+  if (resp) {
+    if ($("showpos").checked) resp.pos.forEach(p => line(p, "rgba(79,163,255,.25)", 1));
+    line(resp.avg, "#4fa3ff", 1.6);
+  }
+
+  // target curve
+  const c = curves[active];
+  line(Float64Array.from(FREQS, f => interpCurve(c, f)), "#ffb84f", 2);
+  c.forEach(([f, d], i) => {
+    ctx.fillStyle = (hoverPt === i || drag?.i === i) ? "#fff" : "#ffb84f";
+    ctx.beginPath(); ctx.arc(fx(f), dy(d), 5, 0, 2 * Math.PI); ctx.fill();
+  });
+
+  // test tone marker
+  ctx.strokeStyle = toneOn ? "#5fd38d" : "rgba(95,211,141,.4)"; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(fx(toneFreq), PAD.t); ctx.lineTo(fx(toneFreq), h - PAD.b); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  ctx.fillStyle = "#4fa3ff"; ctx.fillText("— Messung (Mittel, relativ)", PAD.l + 8, PAD.t + 14);
+  ctx.fillStyle = "#ffb84f"; ctx.fillText("— Zielkurve", PAD.l + 8, PAD.t + 28);
+  ctx.fillStyle = "#5fd38d"; ctx.fillText("┆ Testton", PAD.l + 8, PAD.t + 42);
+}
+
+function pointAt(x, y) {
+  const c = curves[active];
+  for (let i = 0; i < c.length; i++)
+    if (Math.hypot(fx(c[i][0]) - x, dy(c[i][1]) - y) < 8) return i;
+  return null;
+}
+const mpos = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+
+cv.addEventListener("mousedown", e => {
+  const [x, y] = mpos(e), i = pointAt(x, y);
+  if (i !== null) { pushUndo(); drag = { i }; }
+});
+window.addEventListener("mouseup", () => { if (drag) { drag = null; renderAll(); } });
+cv.addEventListener("mousemove", e => {
+  const [x, y] = mpos(e);
+  const f = xf(x), d = yd(y);
+  $("hover").textContent = `${f.toFixed(1)} Hz · ${d.toFixed(1)} dB`;
+  if (drag) {
+    const c = curves[active];
+    c[drag.i] = [Math.round(Math.min(24000, Math.max(10, f)) * 10) / 10,
+                 Math.round(Math.min(20, Math.max(-30, d)) * 10) / 10];
+    const moved = c[drag.i];
+    c.sort((a, b) => a[0] - b[0]);
+    drag.i = c.indexOf(moved);
+    renderPoints(); drawChart();
+  } else {
+    const h = pointAt(x, y);
+    if (h !== hoverPt) { hoverPt = h; drawChart(); }
+  }
+});
+cv.addEventListener("dblclick", e => {
+  const [x, y] = mpos(e), i = pointAt(x, y);
+  pushUndo();
+  if (i !== null) curves[active].splice(i, 1);
+  else curves[active].push([Math.round(xf(x) * 10) / 10, Math.round(yd(y) * 10) / 10]);
+  curves[active].sort((a, b) => a[0] - b[0]);
+  renderAll();
+});
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const [x] = mpos(e), f = xf(x), k = e.deltaY > 0 ? 1.25 : 0.8;
+  view.fmin = Math.max(10, f * (view.fmin / f) ** k);
+  view.fmax = Math.min(24000, f * (view.fmax / f) ** k);
+  drawChart();
+}, { passive: false });
+$("resetzoom").onclick = () => { view.fmin = 10; view.fmax = 24000; drawChart(); };
+$("showpos").onchange = drawChart;
+window.addEventListener("resize", drawChart);
+
+// --------------------------------------------------------------- side panels
+
+function renderChannels() {
+  const box = $("channels"); box.innerHTML = "";
+  data.detectedChannels.forEach((ch, i) => {
+    const row = document.createElement("div");
+    row.className = "chan" + (i === active ? " active" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = targets.has(i);
+    cb.onclick = e => { e.stopPropagation(); cb.checked ? targets.add(i) : targets.delete(i); routeTone(); };
+    const name = document.createElement("span");
+    name.className = "name"; name.textContent = ch.commandId || `#${i}`;
+    row.append(cb, name);
+    if (ch.channelReport?.isReversePolarity) {
+      const t = document.createElement("span"); t.className = "tag"; t.textContent = "verpolt?"; row.append(t);
+    }
+    const n = document.createElement("span"); n.className = "dim"; n.textContent = curves[i].length + " Pkt";
+    row.append(n);
+    row.onclick = () => { active = i; renderAll(); };
+    box.append(row);
+  });
+}
+
+function renderSettings() {
+  const ch = data.detectedChannels[active], box = $("settings"); box.innerHTML = "";
+  const rep = ch.channelReport || {};
+  const info = document.createElement("div"); info.className = "dim";
+  info.innerHTML = `Gemessen: ${rep.distance ?? "?"} m` +
+    (rep.isReversePolarity ? ` · <span class="warn">Verpolung erkannt</span>` : "");
+  box.append(info);
+  const field = (label, key, kind) => {
+    const l = document.createElement("label"), inp = document.createElement("input");
+    l.textContent = label;
+    if (kind === "bool") { inp.type = "checkbox"; inp.checked = !!ch[key]; inp.onchange = () => ch[key] = inp.checked; }
+    else {
+      inp.type = kind === "number" ? "number" : "text"; inp.value = ch[key] ?? "";
+      inp.onchange = () => {
+        if (kind === "number") ch[key] = Number(inp.value);
+        // trim/delay are stored as strings like "0.0"
+        else ch[key] = Number.isFinite(Number(inp.value)) ? Number(inp.value).toFixed(1) : inp.value;
+      };
+    }
+    l.append(inp); box.append(l);
+  };
+  if ("trimAdjustment" in ch) field("Trim (dB)", "trimAdjustment", "str");
+  if ("delayAdjustment" in ch) field("Delay (ms)", "delayAdjustment", "str");
+  if ("midrangeCompensation" in ch) field("Midrange-Komp.", "midrangeCompensation", "bool");
+  if ("frequencyRangeRolloff" in ch) field("Korrektur bis (Hz)", "frequencyRangeRolloff", "number");
+}
+
+function renderPoints() {
+  const c = curves[active], box = $("points");
+  $("curvechan").textContent = "– " + (data.detectedChannels[active].commandId || "");
+  if (!c.length) { box.innerHTML = `<p class="dim">Keine Punkte (Audyssey-Standardkurve).</p>`; return; }
+  const t = document.createElement("table");
+  t.innerHTML = "<tr><th>Hz</th><th>dB</th><th></th></tr>";
+  c.forEach((p, i) => {
+    const tr = document.createElement("tr");
+    for (const j of [0, 1]) {
+      const td = document.createElement("td"), inp = document.createElement("input");
+      inp.type = "number"; inp.step = "0.1"; inp.value = p[j];
+      inp.onchange = () => { pushUndo(); c[i][j] = Number(inp.value); c.sort((a, b) => a[0] - b[0]); renderAll(); };
+      td.append(inp); tr.append(td);
+    }
+    const td = document.createElement("td"), del = document.createElement("button");
+    del.textContent = "✕"; del.onclick = () => { pushUndo(); c.splice(i, 1); renderAll(); };
+    td.append(del); tr.append(td); t.append(tr);
+  });
+  box.innerHTML = ""; box.append(t);
+}
+
+function renderAll() {
+  $("charttitle").textContent = "Frequenzgang – " + (data.detectedChannels[active].commandId || "");
+  renderChannels(); renderSettings(); renderPoints(); drawChart();
+}
+
+$("addpt").onclick = () => { pushUndo(); curves[active].push([1000, 0]); curves[active].sort((a, b) => a[0] - b[0]); renderAll(); };
+$("clearcurve").onclick = () => { pushUndo(); curves[active] = []; renderAll(); };
+$("copycurve").onclick = () => {
+  pushUndo();
+  for (const i of targets) if (i !== active) curves[i] = curves[active].map(p => [...p]);
+  renderAll();
+};
+$("notch").onclick = () => {
+  const f = Number($("nf").value), g = Number($("ng").value), q = Number($("nq").value);
+  if (!(f > 10 && f < 24000 && q > 0)) { alert("Ungültige Notch-Parameter."); return; }
+  if (!targets.size) { alert("Keine Kanäle markiert."); return; }
+  pushUndo();
+  for (const i of targets) curves[i] = applyNotch(curves[i], f, g, q);
+  renderAll();
+};
+$("nfromtone").onclick = () => $("nf").value = toneFreq.toFixed(1);
+
+// ---------------------------------------------------------------- test tone
+
+let audio = null, osc = null, gain = null, toneOn = false, toneFreq = 100, sweepTimer = null;
+const TMIN = 20, TMAX = 2000;
+const sliderToFreq = v => TMIN * (TMAX / TMIN) ** (v / 1000);
+const freqToSlider = f => 1000 * Math.log(f / TMIN) / Math.log(TMAX / TMIN);
+
+function setTone(f) {
+  toneFreq = Math.min(TMAX, Math.max(TMIN, f));
+  $("tonefreq").textContent = toneFreq.toFixed(1) + " Hz";
+  $("toneslider").value = freqToSlider(toneFreq);
+  $("toneinput").value = toneFreq.toFixed(1);
+  if (osc) osc.frequency.setTargetAtTime(toneFreq, audio.currentTime, 0.01);
+  drawChart();
+}
+function vol() { return ($("tonevol").value / 100) ** 2; }
+
+// Output slots in Windows/WAVE channel order. 7.1 puts the side speakers
+// (Audyssey SLA/SRA) on 6/7 and the back speakers on 4/5.
+const SLOTS = {
+  2: { FL: 0, FR: 1 },
+  6: { FL: 0, FR: 1, C: 2, SW1: 3, SLA: 4, SRA: 5 },
+  8: { FL: 0, FR: 1, C: 2, SW1: 3, SBL: 4, SBR: 5, SLA: 6, SRA: 7 },
+};
+let merger = null, outChannels = 2;
+
+function initAudio() {
+  audio = new AudioContext();
+  const max = audio.destination.maxChannelCount;
+  outChannels = max >= 8 ? 8 : max >= 6 ? 6 : 2;
+  const dest = audio.destination;
+  dest.channelCount = outChannels;
+  dest.channelCountMode = "explicit";
+  dest.channelInterpretation = "discrete";
+  merger = audio.createChannelMerger(outChannels);
+  merger.connect(dest);
+}
+
+// Connect the tone only to the checked channels.
+function routeTone() {
+  const slots = SLOTS[outChannels], names = [], missing = [];
+  if (gain) gain.disconnect();
+  for (const i of [...targets].sort((a, b) => a - b)) {
+    const name = data.detectedChannels[i].commandId;
+    if (name in slots) { if (gain) gain.connect(merger, 0, slots[name]); names.push(name); }
+    else missing.push(name);
+  }
+  let msg = audio ? `Ausgabe ${outChannels} Kanäle · Ton auf: ${names.join(", ") || "keinem Kanal"}` :
+                    "Ton geht auf die angehakten Kanäle.";
+  if (missing.length) msg += ` · nicht erreichbar: ${missing.join(", ")}`;
+  if (audio && outChannels === 2) msg += " · Windows-Ausgabe auf 5.1/7.1 stellen, um alle Kanäle zu erreichen";
+  $("toneroute").textContent = msg;
+}
+
+function startTone() {
+  if (!audio) initAudio();
+  osc = audio.createOscillator(); gain = audio.createGain();
+  osc.type = "sine"; osc.frequency.value = toneFreq;
+  gain.gain.value = 0; gain.gain.setTargetAtTime(vol(), audio.currentTime, 0.02);
+  osc.connect(gain); routeTone(); osc.start();
+  toneOn = true; $("tone").textContent = "■ Stop"; drawChart();
+}
+function stopTone() {
+  clearInterval(sweepTimer); sweepTimer = null; $("sweep").textContent = "Sweep";
+  if (osc) { gain.gain.setTargetAtTime(0, audio.currentTime, 0.02); const o = osc; setTimeout(() => o.stop(), 150); }
+  osc = null; toneOn = false; $("tone").textContent = "▶ Ton"; drawChart();
+}
+$("tone").onclick = () => toneOn ? stopTone() : startTone();
+$("tonevol").oninput = () => gain && gain.gain.setTargetAtTime(vol(), audio.currentTime, 0.02);
+$("toneslider").oninput = e => setTone(sliderToFreq(Number(e.target.value)));
+$("toneinput").onchange = e => setTone(Number(e.target.value));
+document.querySelectorAll("[data-step]").forEach(b => b.onclick = () => setTone(toneFreq + Number(b.dataset.step)));
+
+// Slow log sweep (~1/3 octave per 4 s) so a rattle is easy to catch.
+$("sweep").onclick = () => {
+  if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; $("sweep").textContent = "Sweep"; return; }
+  const from = Number($("sweepfrom").value), to = Number($("sweepto").value);
+  setTone(from);
+  if (!toneOn) startTone();
+  $("sweep").textContent = "Sweep anhalten";
+  sweepTimer = setInterval(() => {
+    const next = toneFreq * 2 ** (1 / 3 / 40);
+    if (next > to) { clearInterval(sweepTimer); sweepTimer = null; $("sweep").textContent = "Sweep"; return; }
+    setTone(next);
+  }, 100);
+};
+setTone(100);
+</script>
+</body>
+</html>
